@@ -14,20 +14,14 @@ def _():
 
 
 @app.cell
-def _(data):
-    data.columns
-    return
-
-
-@app.cell
 def _(data, mo):
     domain_selector = mo.ui.multiselect(
-        options=sorted(data["final_domain"].dropna().unique().tolist()),
+        options=sorted(data["L6 Domain"].dropna().unique().tolist()),
         label="Domains"
     )
 
     method_selector = mo.ui.multiselect(
-        options=sorted(data["final_method"].dropna().unique().tolist()),
+        options=sorted(data["L6 Method"].dropna().unique().tolist()),
         label="Methods"
     )
 
@@ -56,10 +50,10 @@ def _(
     filtered_data = data.copy()
 
     if selected_domains:
-        filtered_data = filtered_data[filtered_data["final_domain"].isin(selected_domains)]
+        filtered_data = filtered_data[filtered_data["L6 Domain"].isin(selected_domains)]
 
     if selected_methods:
-        filtered_data = filtered_data[filtered_data["final_method"].isin(selected_methods)]
+        filtered_data = filtered_data[filtered_data["L6 Method"].isin(selected_methods)]
 
     selected_group = country_group_filter.value
 
