@@ -15,7 +15,7 @@ import google.generativeai as genai
 import os 
 from IPython.display import display #
 
-GOOGLE_API_KEY="AIzaSyAKG5SezlW-SleGwM2kYQav4VvAR16AWMI"
+GOOGLE_API_KEY=""
 
 ### Models
 #gemma-3-27b-it
