@@ -2588,8 +2588,7 @@ def run_s5_complete_fix():
     return df_final
 
 # USAGE:
-# Just run this one function and it will handle everything
-# df_s5_clean = run_s5_complete_fix()
+df_s5_clean = run_s5_complete_fix()
 
 
 # In[145]:
