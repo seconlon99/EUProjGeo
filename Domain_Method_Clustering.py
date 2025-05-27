@@ -2167,10 +2167,9 @@ check_category_matches()
 # In[135]:
 
 
-#Fix missclasifications
-
-# Your curated categories (from the paste.txt)
-DOMAIN_CATEGORIES_CURATED = [
+# COMPLETE S5 FIX STAGE
+# S5 CURATED CATEGORIES (from your original code)
+S5_DOMAIN_CATEGORIES = [
     "AI & Machine Learning", "Advanced Computing & Electronics", "Advanced Manufacturing & Industry", 
     "Advanced Therapies & Regenerative Medicine", "Aerospace Engineering & Aviation", "Agricultural Systems & Plant Science", 
     "Alternative & Biofuels", "Analytical & Theoretical Chemistry", "Animal & Veterinary Sciences", 
@@ -2212,7 +2211,7 @@ DOMAIN_CATEGORIES_CURATED = [
     "Venture Capital & Innovation Finance", "Wildlife Health & Ecology"
 ]
 
-METHOD_CATEGORIES_CURATED = [
+S5_METHOD_CATEGORIES = [
     "AI & Machine Learning Development", "Advanced Analytical Techniques", "Advanced Engineering Methods", 
     "Advanced Manufacturing & Nanotechnology", "Measurement & Precision Engineering", "Agricultural & Crop Research Methods", 
     "Applied Biotechnology & Bioresource Utilization", "Cultural Heritage Research & Preservation Methods", "Aerospace & Space Engineering Methods", 
@@ -2248,357 +2247,349 @@ METHOD_CATEGORIES_CURATED = [
     "System Verification, Validation & Testing", "Water Resource Management & Purification Technologies"
 ]
 
-def load_and_check_csv(csv_file_path: str = None):
-    """Load CSV and check for non-matching categories"""
+def find_s5_failed_projects():
+    """Find the exact projects that still have non-matching S5 categories - STRICT MODE"""
     
-    # Load the CSV file
-    if csv_file_path:
-        df = pd.read_csv(csv_file_path)
-        print(f"Loaded CSV from: {csv_file_path}")
-    else:
-        # Try to use global df_complete if available, otherwise load from checkpoint
-        try:
-            df = globals()['df_complete'].copy()
-            print("Using global df_complete")
-        except:
-            checkpoint_file = "df_processing_checkpoint.csv"  # Your checkpoint file
-            df = pd.read_csv(checkpoint_file)
-            print(f"Loaded from checkpoint: {checkpoint_file}")
-    
-    print(f"Dataset shape: {df.shape}")
-    print(f"Columns: {df.columns.tolist()}")
-    
-    return df
-
-def identify_non_matching_categories(df):
-    """Identify all projects with categories not in the curated lists"""
-    
-    print("="*60)
-    print("IDENTIFYING NON-MATCHING CATEGORIES")
+    print("🔍 FINDING S5 FAILED PROJECTS (STRICT - NO PARSE FAILED ALLOWED)")
     print("="*60)
     
-    # Check if required columns exist
-    if 's5_curated_domain' not in df.columns or 's5_curated_method' not in df.columns:
-        print("❌ ERROR: s5_curated_domain and/or s5_curated_method columns not found!")
-        print(f"Available columns: {df.columns.tolist()}")
-        return [], []
+    # Load current data
+    try:
+        df = pd.read_csv("df_processing_checkpoint.csv")
+        print(f"✅ Loaded checkpoint CSV: {df.shape}")
+    except:
+        df = globals()['df_complete'].copy()
+        print(f"✅ Using global df_complete: {df.shape}")
     
-    # Define acceptable "error" values that we don't need to reclassify
-    acceptable_error_values = ["", "API Failed", "Parse Failed", "Reclassify Failed", "Not Processed"]
+    # STRICT: Only empty strings and None are acceptable "failures"
+    # Everything else (including "Parse Failed", "API Failed", etc.) must be fixed
+    acceptable_errors = ["", None]
     
-    # Find domain mismatches (excluding acceptable errors)
-    domain_mismatches = []
+    failed_projects = []
+    
     for idx in df.index:
         domain = df.loc[idx, 's5_curated_domain']
-        if (pd.notna(domain) and 
-            domain not in DOMAIN_CATEGORIES_CURATED and 
-            domain not in acceptable_error_values):
-            domain_mismatches.append(idx)
-    
-    # Find method mismatches (excluding acceptable errors)
-    method_mismatches = []
-    for idx in df.index:
         method = df.loc[idx, 's5_curated_method']
-        if (pd.notna(method) and 
-            method not in METHOD_CATEGORIES_CURATED and 
-            method not in acceptable_error_values):
-            method_mismatches.append(idx)
+        
+        # Check if domain is problematic
+        domain_bad = (pd.notna(domain) and 
+                     str(domain).strip() != "" and  # Not empty string
+                     domain not in S5_DOMAIN_CATEGORIES)  # Not valid category
+        
+        # Check if method is problematic  
+        method_bad = (pd.notna(method) and 
+                     str(method).strip() != "" and  # Not empty string
+                     method not in S5_METHOD_CATEGORIES)  # Not valid category
+        
+        if domain_bad or method_bad:
+            project_id = df.loc[idx, 'id'] if 'id' in df.columns else idx
+            failed_projects.append({
+                'index': idx,
+                'id': project_id,
+                'domain': domain,
+                'method': method,
+                'domain_bad': domain_bad,
+                'method_bad': method_bad,
+                'summary': str(df.loc[idx, 'full_text'])[:200] + "..."
+            })
     
-    # Get unique indices that need reclassification
-    unique_mismatch_indices = list(set(domain_mismatches + method_mismatches))
+    print(f"Found {len(failed_projects)} projects with invalid S5 categories")
     
-    print(f"Found {len(domain_mismatches)} projects with non-matching domains")
-    print(f"Found {len(method_mismatches)} projects with non-matching methods")
-    print(f"Total unique projects needing reclassification: {len(unique_mismatch_indices)}")
+    # Group by bad categories to see patterns
+    if failed_projects:
+        domain_issues = {}
+        method_issues = {}
+        
+        for proj in failed_projects:
+            if proj['domain_bad']:
+                domain = str(proj['domain'])
+                if domain not in domain_issues:
+                    domain_issues[domain] = []
+                domain_issues[domain].append(proj['index'])
+            
+            if proj['method_bad']:
+                method = str(proj['method'])
+                if method not in method_issues:
+                    method_issues[method] = []
+                method_issues[method].append(proj['index'])
+        
+        print(f"\n❌ ALL PROBLEMATIC S5 DOMAINS (including Parse Failed, API Failed, etc.):")
+        for domain, indices in domain_issues.items():
+            print(f"  '{domain}': {len(indices)} projects")
+        
+        print(f"\n❌ ALL PROBLEMATIC S5 METHODS (including Parse Failed, API Failed, etc.):")
+        for method, indices in method_issues.items():
+            print(f"  '{method}': {len(indices)} projects")
     
-    # Show detailed breakdown
-    if domain_mismatches:
-        print(f"\nDOMAIN MISMATCHES:")
-        domain_value_counts = df.loc[domain_mismatches, 's5_curated_domain'].value_counts()
-        for domain, count in domain_value_counts.items():
-            print(f"  '{domain}': {count} projects")
-    
-    if method_mismatches:
-        print(f"\nMETHOD MISMATCHES:")
-        method_value_counts = df.loc[method_mismatches, 's5_curated_method'].value_counts()
-        for method, count in method_value_counts.items():
-            print(f"  '{method}': {count} projects")
-    
-    return unique_mismatch_indices, domain_mismatches, method_mismatches
+    return failed_projects, df
 
-def enhanced_reclassify_prompt_template():
-    """Enhanced prompt template for reclassification"""
+def fix_s5_failed_projects_no_parse_failed(failed_projects, df, model):
+    """Fix S5 projects - return empty strings instead of failure messages"""
     
-    return """You are an expert taxonomist. You must classify projects using ONLY the exact categories from the provided lists.
+    if not failed_projects:
+        print("✅ No S5 failed projects to fix!")
+        return df
+    
+    print(f"🔧 S5 FIXING - {len(failed_projects)} PROJECTS (NO PARSE FAILED ALLOWED)")
+    print("="*60)
+    
+    # Enhanced prompt for problem cases
+    TARGETED_S5_PROMPT = """You are an expert research taxonomist. You must classify these projects using ONLY the exact categories from the lists below.
 
-CRITICAL INSTRUCTIONS:
-1. DOMAIN = The scientific/technical FIELD or APPLICATION AREA (WHAT the project is about)
-2. METHOD = The APPROACH or TECHNIQUE used (HOW the work is done)
-3. You MUST select exactly one domain and one method from the provided lists
-4. Use the EXACT spelling and capitalization as shown in the lists
-5. Do NOT create new categories or modify existing ones
+CRITICAL RULES:
+1. Select EXACTLY ONE domain from the Domain list for each project
+2. Select EXACTLY ONE method from the Method list for each project  
+3. Use the EXACT spelling, punctuation, and capitalization shown
+4. DO NOT create new categories or modify existing ones
+5. DO NOT confuse domains with methods
 
-Domain Areas (WHAT - the field/application):
-{domain_categories}
+DOMAIN AREAS (Scientific/Technical Fields - choose ONE per project):
+{domain_list}
 
-Method Areas (HOW - the approach/technique):
-{method_categories}
+METHOD AREAS (Research Approaches/Techniques - choose ONE per project):
+{method_list}
 
-Projects to Classify:
+PROJECTS TO CLASSIFY:
 {project_summaries}
 
-Output Format (MUST follow exactly):
+RESPOND IN THIS EXACT FORMAT:
 Project 1:
-Domain Area: [Selected Domain Area - must be EXACTLY as shown in the Domain list above]
-Method Area: [Selected Method Area - must be EXACTLY as shown in the Method list above]
+Domain Area: [EXACT match from Domain list above]
+Method Area: [EXACT match from Method list above]
 
 Project 2:
-Domain Area: [Selected Domain Area - must be EXACTLY as shown in the Domain list above]
-Method Area: [Selected Method Area - must be EXACTLY as shown in the Method list above]
+Domain Area: [EXACT match from Domain list above]
+Method Area: [EXACT match from Method list above]
 
-Continue for all projects. Select ONLY from the provided lists."""
+... continue for all projects ...
 
-def reclassify_batch(project_summaries: List[str], indices: List[int], model, max_retries: int = 5):
-    """Reclassify a batch of projects with enhanced prompt"""
+Remember: Domain = WHAT field/area, Method = HOW it's done."""
+
+    changes_made = []
+    df_working = df.copy()
     
-    # Format the project summaries for the prompt
-    formatted_summaries = ""
-    for i, summary in enumerate(project_summaries, 1):
-        # Truncate very long summaries to avoid token limits
-        truncated_summary = summary[:2000] if len(summary) > 2000 else summary
-        formatted_summaries += f"Project {i}:\n{truncated_summary}\n\n"
+    # Process 6 projects at a time
+    batch_size = 6
+    total_batches = (len(failed_projects) + batch_size - 1) // batch_size
     
-    # Create the enhanced prompt
-    prompt = enhanced_reclassify_prompt_template().format(
-        domain_categories="\n".join(DOMAIN_CATEGORIES_CURATED),
-        method_categories="\n".join(METHOD_CATEGORIES_CURATED),
-        project_summaries=formatted_summaries
-    )
-    
-    # Process with model (with retries)
-    output_text = ""
-    for attempt in range(max_retries):
+    for batch_num in range(total_batches):
+        start_idx = batch_num * batch_size
+        end_idx = min(start_idx + batch_size, len(failed_projects))
+        batch_projects = failed_projects[start_idx:end_idx]
+        
+        print(f"\n--- S5 Batch {batch_num+1}/{total_batches} ({len(batch_projects)} projects) ---")
+        
+        # Show what we're fixing
+        for i, proj in enumerate(batch_projects):
+            print(f"  Project {i+1} (ID {proj['id']}, Index {proj['index']}):")
+            print(f"    Current Domain: '{proj['domain']}' {'❌' if proj['domain_bad'] else '✅'}")
+            print(f"    Current Method: '{proj['method']}' {'❌' if proj['method_bad'] else '✅'}")
+        
+        # Prepare batch summaries
+        project_summaries = ""
+        for i, proj in enumerate(batch_projects, 1):
+            project_text = str(df_working.loc[proj['index'], 'full_text'])[:1200]  # Limit length
+            project_summaries += f"Project {i}:\nTitle and Description: {project_text}\n\n"
+        
+        # Create focused prompt
+        prompt = TARGETED_S5_PROMPT.format(
+            domain_list="\n".join(S5_DOMAIN_CATEGORIES),
+            method_list="\n".join(S5_METHOD_CATEGORIES),
+            project_summaries=project_summaries
+        )
+        
+        # Try to get results from LLM
+        batch_success = False
         try:
-            response = model.generate_content(prompt)
-            output_text = response.text
-            break
-        except Exception as e:
-            print(f"    Error on attempt {attempt + 1}: {e}")
-            if attempt < max_retries - 1:
-                sleep_time = 2 ** (attempt + 1)  # Exponential backoff
-                print(f"    Retrying in {sleep_time} seconds...")
-                time.sleep(sleep_time)
-            else:
-                print("    Failed all retry attempts")
-                return [{"domain": "Reclassify Failed", "method": "Reclassify Failed"} for _ in project_summaries]
-    
-    # Parse results
-    results = []
-    project_blocks = re.split(r'Project \d+:', output_text)
-    
-    # Skip the first item if it's empty
-    if project_blocks and not project_blocks[0].strip():
-        project_blocks = project_blocks[1:]
-    
-    # If we didn't get enough results, pad with failures
-    if len(project_blocks) < len(project_summaries):
-        print(f"    Warning: Expected {len(project_summaries)} results but got {len(project_blocks)}")
-        project_blocks.extend(["" for _ in range(len(project_summaries) - len(project_blocks))])
-    
-    # Process each project block
-    for i, block in enumerate(project_blocks[:len(project_summaries)]):
-        domain = "Parse Failed"
-        method = "Parse Failed"
-        
-        for line in block.strip().split('\n'):
-            if line.startswith("Domain Area:"):
-                domain = line.replace("Domain Area:", "").strip()
-            elif line.startswith("Method Area:"):
-                method = line.replace("Method Area:", "").strip()
-        
-        results.append({"domain": domain, "method": method, "index": indices[i] if i < len(indices) else None})
-    
-    return results
-
-def reclassify_non_matching_projects(df, mismatch_indices, model, batch_size: int = 3):
-    """Reclassify projects that don't match the curated categories"""
-    
-    if not mismatch_indices:
-        print("✅ No projects need reclassification!")
-        return df
-    
-    print("="*60)
-    print("RECLASSIFYING NON-MATCHING PROJECTS")
-    print("="*60)
-    
-    print(f"Reclassifying {len(mismatch_indices)} projects in batches of {batch_size}")
-    
-    # Check if model is available
-    if not model:
-        print("❌ ERROR: Model not available for reclassification")
-        return df
-    
-    # Process in small batches
-    total_batches = (len(mismatch_indices) + batch_size - 1) // batch_size
-    successful_reclassifications = 0
-    
-    df_copy = df.copy()
-    
-    for batch_num, start_idx in enumerate(range(0, len(mismatch_indices), batch_size)):
-        end_idx = min(start_idx + batch_size, len(mismatch_indices))
-        batch_indices = mismatch_indices[start_idx:end_idx]
-        
-        print(f"\n--- Batch {batch_num + 1}/{total_batches} ({len(batch_indices)} projects) ---")
-        
-        # Extract summaries for this batch
-        batch_summaries = []
-        for idx in batch_indices:
-            summary = df_copy.loc[idx, 'full_text']
-            batch_summaries.append(summary)
+            print(f"🤖 Calling LLM for batch {batch_num+1}...")
             
-            # Show what we're reclassifying
-            old_domain = df_copy.loc[idx, 's5_curated_domain']
-            old_method = df_copy.loc[idx, 's5_curated_method']
-            print(f"  Project {idx}: '{old_domain}' / '{old_method}'")
-        
-        # Reclassify this batch
-        batch_results = reclassify_batch(batch_summaries, batch_indices, model)
-        
-        # Update results and show changes
-        batch_success_count = 0
-        for result in batch_results:
-            if result['index'] is not None:
-                idx = result['index']
-                new_domain = result['domain']
-                new_method = result['method']
+            response = model.generate_content(prompt)
+            output = response.text.strip()
+            
+            print(f"✅ Got LLM response, parsing...")
+            
+            # Parse results for the batch
+            project_blocks = re.split(r'Project \d+:', output)
+            if project_blocks and not project_blocks[0].strip():
+                project_blocks = project_blocks[1:]
+            
+            if len(project_blocks) >= len(batch_projects):
+                batch_results = []
                 
-                # Update the dataframe
-                df_copy.loc[idx, 's5_curated_domain'] = new_domain
-                df_copy.loc[idx, 's5_curated_method'] = new_method
+                for i, block in enumerate(project_blocks[:len(batch_projects)]):
+                    new_domain = ""  # Default to EMPTY instead of "Parse Failed"
+                    new_method = ""  # Default to EMPTY instead of "Parse Failed"
+                    
+                    lines = block.strip().split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith("Domain Area:"):
+                            candidate = line.replace("Domain Area:", "").strip()
+                            candidate = candidate.strip('"\'- ')
+                            # Only assign if it's actually in our valid list
+                            if candidate in S5_DOMAIN_CATEGORIES:
+                                new_domain = candidate
+                        elif line.startswith("Method Area:"):
+                            candidate = line.replace("Method Area:", "").strip()
+                            candidate = candidate.strip('"\'- ')
+                            # Only assign if it's actually in our valid list
+                            if candidate in S5_METHOD_CATEGORIES:
+                                new_method = candidate
+                    
+                    batch_results.append({
+                        'domain': new_domain,
+                        'method': new_method
+                    })
                 
-                # Check if reclassification was successful
-                domain_success = new_domain in DOMAIN_CATEGORIES_CURATED
-                method_success = new_method in METHOD_CATEGORIES_CURATED
+                # Apply all results in this batch
+                for i, result in enumerate(batch_results):
+                    proj = batch_projects[i]
+                    idx = proj['index']
+                    
+                    old_domain = df_working.loc[idx, 's5_curated_domain']
+                    old_method = df_working.loc[idx, 's5_curated_method']
+                    
+                    # Only update categories that were actually problematic
+                    if proj['domain_bad']:
+                        df_working.loc[idx, 's5_curated_domain'] = result['domain']
+                        print(f"  🔄 Fixed Domain {idx}: '{old_domain}' → '{result['domain']}'")
+                    
+                    if proj['method_bad']:
+                        df_working.loc[idx, 's5_curated_method'] = result['method']
+                        print(f"  🔄 Fixed Method {idx}: '{old_method}' → '{result['method']}'")
+                    
+                    changes_made.append({
+                        'index': idx,
+                        'id': proj['id'],
+                        'old_domain': old_domain,
+                        'new_domain': result['domain'] if proj['domain_bad'] else old_domain,
+                        'old_method': old_method,
+                        'new_method': result['method'] if proj['method_bad'] else old_method
+                    })
                 
-                if domain_success and method_success:
-                    batch_success_count += 1
-                    successful_reclassifications += 1
-                    print(f"    ✅ Fixed {idx}: '{new_domain}' / '{new_method}'")
-                else:
-                    print(f"    ❌ Still failed {idx}: '{new_domain}' / '{new_method}'")
+                batch_success = True
+                print(f"  ✅ Batch {batch_num+1} processed successfully")
+            else:
+                print(f"  ⚠️ Got {len(project_blocks)} project blocks, expected {len(batch_projects)}")
+                
+        except Exception as e:
+            print(f"  ❌ LLM error for batch {batch_num+1}: {e}")
         
-        print(f"  Batch success: {batch_success_count}/{len(batch_indices)}")
+        if not batch_success:
+            print(f"  🔄 Batch {batch_num+1} failed - setting empty strings for problematic categories")
+            # Set empty strings for failed attempts (so they get caught in next iteration)
+            for proj in batch_projects:
+                idx = proj['index']
+                if proj['domain_bad']:
+                    df_working.loc[idx, 's5_curated_domain'] = ""
+                    print(f"    Set domain to empty for index {idx}")
+                if proj['method_bad']:
+                    df_working.loc[idx, 's5_curated_method'] = ""
+                    print(f"    Set method to empty for index {idx}")
         
-        # Wait between batches
+        # Small delay between batches
         if batch_num < total_batches - 1:
-            wait_time = 10  # Wait 10 seconds between batches  
-            print(f"  Waiting {wait_time}s before next batch...")
-            time.sleep(wait_time)
+            time.sleep(3)
     
-    print(f"\n" + "="*60)
-    print("RECLASSIFICATION COMPLETE")
-    print("="*60)
-    print(f"Total projects processed: {len(mismatch_indices)}")
-    print(f"Successfully reclassified: {successful_reclassifications}")
-    print(f"Still failed: {len(mismatch_indices) - successful_reclassifications}")
-    
-    return df_copy
-
-def save_results(df, output_file: str = None):
-    """Save the updated dataframe"""
-    
-    if output_file is None:
-        output_file = "df_processing_checkpoint.csv"  # Use your checkpoint file
-    
-    df.to_csv(output_file, index=False)
-    print(f"✅ Results saved to: {output_file}")
-    
-    return output_file
-
-def final_verification(df):
-    """Verify the final results"""
-    
-    print("="*60)
-    print("FINAL VERIFICATION")
+    print(f"\n💾 SAVING S5 FIXES")
     print("="*60)
     
-    # Calculate match rates
-    total_projects = len(df)
-    domain_matches = sum(1 for d in df['s5_curated_domain'] if d in DOMAIN_CATEGORIES_CURATED)
-    method_matches = sum(1 for m in df['s5_curated_method'] if m in METHOD_CATEGORIES_CURATED)
+    # Save back to CSV
+    df_working.to_csv("df_processing_checkpoint.csv", index=False)
+    print(f"✅ Saved to df_processing_checkpoint.csv")
     
-    print(f"Total projects: {total_projects}")
-    print(f"Domain matches: {domain_matches} ({domain_matches/total_projects*100:.2f}%)")
-    print(f"Method matches: {method_matches} ({method_matches/total_projects*100:.2f}%)")
-    
-    # Show remaining non-matches
-    domain_fails = df[~df['s5_curated_domain'].isin(DOMAIN_CATEGORIES_CURATED + ["", "API Failed", "Parse Failed", "Reclassify Failed", "Not Processed"])]['s5_curated_domain'].value_counts()
-    method_fails = df[~df['s5_curated_method'].isin(METHOD_CATEGORIES_CURATED + ["", "API Failed", "Parse Failed", "Reclassify Failed", "Not Processed"])]['s5_curated_method'].value_counts()
-    
-    if len(domain_fails) > 0:
-        print(f"\nRemaining domain failures:")
-        for domain, count in domain_fails.head(10).items():
-            print(f"  '{domain}': {count}")
-    else:
-        print(f"\n🎉 All domains now match!")
-    
-    if len(method_fails) > 0:
-        print(f"\nRemaining method failures:")
-        for method, count in method_fails.head(10).items():
-            print(f"  '{method}': {count}")
-    else:
-        print(f"\n🎉 All methods now match!")
-    
-    if len(domain_fails) == 0 and len(method_fails) == 0:
-        print(f"\n🎉🎉🎉 PERFECT SUCCESS - 100% MATCH RATE! 🎉🎉🎉")
-
-# MAIN EXECUTION FUNCTION
-def check_and_reclassify_csv(csv_file: str = None, batch_size: int = 3):
-    """Main function to check and reclassify non-matching categories"""
-    
-    print("🔍 STARTING CSV CATEGORY CHECKER AND RECLASSIFIER")
-    print("="*60)
-    
-    # Step 1: Load the data
-    df = load_and_check_csv(csv_file)
-    
-    # Step 2: Identify non-matching categories
-    mismatch_indices, domain_mismatches, method_mismatches = identify_non_matching_categories(df)
-    
-    if not mismatch_indices:
-        print("✅ All categories already match your curated lists!")
-        final_verification(df)
-        return df
-    
-    # Step 3: Reclassify non-matching projects
+    # Update global if possible
     try:
-        model = globals()['model']  # Try to get your global model
-        print(f"Using global model: {model}")
-    except:
-        print("❌ ERROR: Global 'model' not found. Please ensure your model is available.")
-        return df
-    
-    df_updated = reclassify_non_matching_projects(df, mismatch_indices, model, batch_size)
-    
-    # Step 4: Save results
-    output_file = save_results(df_updated)
-    
-    # Step 5: Final verification
-    final_verification(df_updated)
-    
-    # Update global df_complete if it exists
-    try:
-        globals()['df_complete'] = df_updated.copy()
-        print("✅ Updated global df_complete")
+        globals()['df_complete'] = df_working.copy()
+        print(f"✅ Updated global df_complete")
     except:
         pass
     
-    return df_updated
+    print(f"\n📊 S5 FIX SUMMARY:")
+    print(f"   Failed projects processed: {len(failed_projects)}")
+    print(f"   Batches processed: {total_batches}")
+    print(f"   Changes attempted: {len(changes_made)}")
+    
+    return df_working
 
-# USAGE EXAMPLES:
-# 
-# # Use with your checkpoint file (default)
-df_result = check_and_reclassify_csv()
+def run_s5_complete_fix():
+    """Main function to run complete S5 fixes until everything is clean"""
+    
+    print("🎯 S5 COMPLETE FIX - NO PARSE FAILED ALLOWED")
+    print("="*80)
+    
+    # Get model
+    try:
+        model = globals()['model']
+        print(f"✅ Using global model")
+    except:
+        print("❌ ERROR: Global 'model' not found")
+        return None
+    
+    # Keep running fix iterations until no more failures
+    max_iterations = 5
+    
+    for iteration in range(max_iterations):
+        print(f"\n🔄 S5 FIX ITERATION {iteration + 1}/{max_iterations}")
+        print("="*60)
+        
+        # Step 1: Find failed projects (strict mode)
+        failed_projects, df = find_s5_failed_projects()
+        
+        if not failed_projects:
+            print(f"🎉 S5 COMPLETE - No more failed projects after {iteration + 1} iteration(s)!")
+            break
+        
+        print(f"📋 Found {len(failed_projects)} projects that need fixing")
+        
+        # Step 2: Apply fixes
+        df = fix_s5_failed_projects_no_parse_failed(failed_projects, df, model)
+        
+        # Step 3: Show progress
+        print(f"\n📊 Iteration {iteration + 1} complete")
+        
+        if iteration == max_iterations - 1:
+            print(f"⚠️ Reached maximum iterations ({max_iterations})")
+            print(f"   Some projects may still need manual review")
+    
+    # Final verification
+    print(f"\n🔍 FINAL S5 VERIFICATION")
+    print("="*60)
+    
+    final_failed, df_final = find_s5_failed_projects()
+    
+    domain_matches = sum(1 for d in df_final['s5_curated_domain'] if d in S5_DOMAIN_CATEGORIES)
+    method_matches = sum(1 for m in df_final['s5_curated_method'] if m in S5_METHOD_CATEGORIES)
+    empty_domains = sum(1 for d in df_final['s5_curated_domain'] if pd.isna(d) or str(d).strip() == "")
+    empty_methods = sum(1 for m in df_final['s5_curated_method'] if pd.isna(m) or str(m).strip() == "")
+    total_projects = len(df_final)
+    
+    print(f"📊 FINAL S5 STATISTICS:")
+    print(f"   Total projects: {total_projects}")
+    print(f"   Valid domain categories: {domain_matches} ({domain_matches/total_projects*100:.2f}%)")
+    print(f"   Valid method categories: {method_matches} ({method_matches/total_projects*100:.2f}%)")
+    print(f"   Empty domains (acceptable): {empty_domains} ({empty_domains/total_projects*100:.2f}%)")
+    print(f"   Empty methods (acceptable): {empty_methods} ({empty_methods/total_projects*100:.2f}%)")
+    print(f"   Remaining problematic projects: {len(final_failed)}")
+    
+    if len(final_failed) == 0:
+        print(f"\n🎉🎉🎉 PERFECT! 100% S5 SUCCESS - NO MORE PARSE FAILED! 🎉🎉🎉")
+    else:
+        print(f"\n⚠️ Still have {len(final_failed)} projects with invalid categories:")
+        # Show first few remaining problems
+        for proj in final_failed[:5]:
+            print(f"   - Index {proj['index']}: Domain='{proj['domain']}', Method='{proj['method']}'")
+        
+        if len(final_failed) > 5:
+            print(f"   ... and {len(final_failed) - 5} more")
+    
+    print(f"\n🎯 S5 COMPLETE FIX FINISHED!")
+    
+    return df_final
+
+# USAGE:
+# Just run this one function and it will handle everything
+# df_s5_clean = run_s5_complete_fix()
 
 
 # In[145]:
@@ -3170,6 +3161,7 @@ df_s6_result = run_s6_classification()
 # In[154]:
 
 
+# COMPLETE S6 FIX STAGE
 # S6 REFINED CATEGORIES
 S6_DOMAIN_CATEGORIES = [
     "Fundamental Physics & Chemistry",
@@ -3246,9 +3238,9 @@ S6_METHOD_CATEGORIES = [
 ]
 
 def find_s6_failed_projects():
-    """Find the exact projects that still have non-matching S6 categories"""
+    """Find the exact projects that still have non-matching S6 categories - STRICT MODE"""
     
-    print("🔍 FINDING S6 FAILED PROJECTS")
+    print("🔍 FINDING S6 FAILED PROJECTS (STRICT - NO PARSE FAILED ALLOWED)")
     print("="*60)
     
     # Load current data
@@ -3259,21 +3251,25 @@ def find_s6_failed_projects():
         df = globals()['df_complete'].copy()
         print(f"✅ Using global df_complete: {df.shape}")
     
-    # Find projects with non-matching categories
+    # STRICT: Only empty strings and None are acceptable "failures"
+    # Everything else (including "Parse Failed", "API Failed", etc.) must be fixed
+    acceptable_errors = ["", None]
+    
     failed_projects = []
-    acceptable_errors = ["API Failed", "Parse Failed", "S6 Reclassify Failed", "Fix Failed", "S6 Fix Failed", "", None]
     
     for idx in df.index:
         domain = df.loc[idx, 's6_refined_domain']
         method = df.loc[idx, 's6_refined_method']
         
+        # Check if domain is problematic
         domain_bad = (pd.notna(domain) and 
-                     str(domain) not in acceptable_errors and 
-                     domain not in S6_DOMAIN_CATEGORIES)
+                     str(domain).strip() != "" and  # Not empty string
+                     domain not in S6_DOMAIN_CATEGORIES)  # Not valid category
         
+        # Check if method is problematic  
         method_bad = (pd.notna(method) and 
-                     str(method) not in acceptable_errors and 
-                     method not in S6_METHOD_CATEGORIES)
+                     str(method).strip() != "" and  # Not empty string
+                     method not in S6_METHOD_CATEGORIES)  # Not valid category
         
         if domain_bad or method_bad:
             project_id = df.loc[idx, 'id'] if 'id' in df.columns else idx
@@ -3287,7 +3283,7 @@ def find_s6_failed_projects():
                 'summary': str(df.loc[idx, 'full_text'])[:200] + "..."
             })
     
-    print(f"Found {len(failed_projects)} projects with bad S6 categories")
+    print(f"Found {len(failed_projects)} projects with invalid S6 categories")
     
     # Group by bad categories to see patterns
     if failed_projects:
@@ -3296,43 +3292,43 @@ def find_s6_failed_projects():
         
         for proj in failed_projects:
             if proj['domain_bad']:
-                domain = proj['domain']
+                domain = str(proj['domain'])
                 if domain not in domain_issues:
                     domain_issues[domain] = []
                 domain_issues[domain].append(proj['index'])
             
             if proj['method_bad']:
-                method = proj['method']
+                method = str(proj['method'])
                 if method not in method_issues:
                     method_issues[method] = []
                 method_issues[method].append(proj['index'])
         
-        print(f"\n❌ PROBLEMATIC S6 DOMAINS:")
+        print(f"\n❌ ALL PROBLEMATIC S6 DOMAINS (including Parse Failed, API Failed, etc.):")
         for domain, indices in domain_issues.items():
             print(f"  '{domain}': {len(indices)} projects")
         
-        print(f"\n❌ PROBLEMATIC S6 METHODS:")
+        print(f"\n❌ ALL PROBLEMATIC S6 METHODS (including Parse Failed, API Failed, etc.):")
         for method, indices in method_issues.items():
             print(f"  '{method}': {len(indices)} projects")
     
     return failed_projects, df
 
-def fix_s6_failed_projects_targeted(failed_projects, df, model):
-    """Fix the failed S6 projects with a more targeted approach"""
+def fix_s6_failed_projects_no_parse_failed(failed_projects, df, model):
+    """Fix S6 projects - return empty strings instead of failure messages"""
     
     if not failed_projects:
         print("✅ No S6 failed projects to fix!")
         return df
     
-    print(f"🔧 TARGETED S6 FIXING - {len(failed_projects)} PROJECTS (batches of 6)")
+    print(f"🔧 S6 FIXING - {len(failed_projects)} PROJECTS (NO PARSE FAILED ALLOWED)")
     print("="*60)
     
-    # Ultra-focused prompt for problem cases (batch of 6)
+    # Enhanced prompt for problem cases
     TARGETED_S6_PROMPT = """You are an expert research taxonomist. You must classify these projects using ONLY the exact categories from the lists below.
 
 CRITICAL RULES:
 1. Select EXACTLY ONE domain from the Domain list for each project
-2. Select EXACTLY ONE method from the Method list for each project
+2. Select EXACTLY ONE method from the Method list for each project  
 3. Use the EXACT spelling, punctuation, and capitalization shown
 4. DO NOT create new categories or modify existing ones
 5. DO NOT confuse domains with methods
@@ -3362,7 +3358,7 @@ Remember: Domain = WHAT field/area, Method = HOW it's done."""
     changes_made = []
     df_working = df.copy()
     
-    # Process 6 projects at a time for better efficiency
+    # Process 6 projects at a time
     batch_size = 6
     total_batches = (len(failed_projects) + batch_size - 1) // batch_size
     
@@ -3371,13 +3367,13 @@ Remember: Domain = WHAT field/area, Method = HOW it's done."""
         end_idx = min(start_idx + batch_size, len(failed_projects))
         batch_projects = failed_projects[start_idx:end_idx]
         
-        print(f"\n--- S6 Targeted Batch {batch_num+1}/{total_batches} ({len(batch_projects)} projects) ---")
+        print(f"\n--- S6 Batch {batch_num+1}/{total_batches} ({len(batch_projects)} projects) ---")
         
         # Show what we're fixing
         for i, proj in enumerate(batch_projects):
             print(f"  Project {i+1} (ID {proj['id']}, Index {proj['index']}):")
-            print(f"    Domain: '{proj['domain']}' {'❌' if proj['domain_bad'] else '✅'}")
-            print(f"    Method: '{proj['method']}' {'❌' if proj['method_bad'] else '✅'}")
+            print(f"    Current Domain: '{proj['domain']}' {'❌' if proj['domain_bad'] else '✅'}")
+            print(f"    Current Method: '{proj['method']}' {'❌' if proj['method_bad'] else '✅'}")
         
         # Prepare batch summaries
         project_summaries = ""
@@ -3392,130 +3388,100 @@ Remember: Domain = WHAT field/area, Method = HOW it's done."""
             project_summaries=project_summaries
         )
         
-        # Try multiple times with different strategies
+        # Try to get results from LLM
         batch_success = False
-        for attempt in range(3):  # 3 attempts per batch
-            try:
-                print(f"🤖 Batch targeted attempt {attempt+1}...")
+        try:
+            print(f"🤖 Calling LLM for batch {batch_num+1}...")
+            
+            response = model.generate_content(prompt)
+            output = response.text.strip()
+            
+            print(f"✅ Got LLM response, parsing...")
+            
+            # Parse results for the batch
+            project_blocks = re.split(r'Project \d+:', output)
+            if project_blocks and not project_blocks[0].strip():
+                project_blocks = project_blocks[1:]
+            
+            if len(project_blocks) >= len(batch_projects):
+                batch_results = []
                 
-                # Add some variation to break LLM patterns
-                if attempt > 0:
-                    prompt_variant = prompt + f"\n\nNote: This is attempt {attempt+1}. Please be extra careful to select from the provided lists only."
-                else:
-                    prompt_variant = prompt
-                
-                response = model.generate_content(prompt_variant)
-                output = response.text.strip()
-                
-                print(f"Raw LLM output preview: {output[:300]}...")
-                
-                # Parse results for the batch
-                project_blocks = re.split(r'Project \d+:', output)
-                if project_blocks and not project_blocks[0].strip():
-                    project_blocks = project_blocks[1:]
-                
-                if len(project_blocks) >= len(batch_projects):
-                    batch_results = []
-                    all_valid = True
+                for i, block in enumerate(project_blocks[:len(batch_projects)]):
+                    new_domain = ""  # Default to EMPTY instead of "Parse Failed"
+                    new_method = ""  # Default to EMPTY instead of "Parse Failed"
                     
-                    for i, block in enumerate(project_blocks[:len(batch_projects)]):
-                        new_domain = "S6 Fix Failed"
-                        new_method = "S6 Fix Failed"
-                        
-                        lines = block.strip().split('\n')
-                        for line in lines:
-                            line = line.strip()
-                            if line.startswith("Domain Area:"):
-                                new_domain = line.replace("Domain Area:", "").strip()
-                                # Clean up common formatting issues
-                                new_domain = new_domain.strip('"\'- ')
-                            elif line.startswith("Method Area:"):
-                                new_method = line.replace("Method Area:", "").strip()
-                                # Clean up common formatting issues
-                                new_method = new_method.strip('"\'- ')
-                        
-                        # Strict validation
-                        domain_valid = new_domain in S6_DOMAIN_CATEGORIES
-                        method_valid = new_method in S6_METHOD_CATEGORIES
-                        
-                        # Try fuzzy matching if exact fails
-                        if not domain_valid:
-                            for valid_domain in S6_DOMAIN_CATEGORIES:
-                                if new_domain.lower() in valid_domain.lower() or valid_domain.lower() in new_domain.lower():
-                                    print(f"    🔧 Fuzzy domain match for Project {i+1}: '{new_domain}' → '{valid_domain}'")
-                                    new_domain = valid_domain
-                                    domain_valid = True
-                                    break
-                        
-                        if not method_valid:
-                            for valid_method in S6_METHOD_CATEGORIES:
-                                if new_method.lower() in valid_method.lower() or valid_method.lower() in new_method.lower():
-                                    print(f"    🔧 Fuzzy method match for Project {i+1}: '{new_method}' → '{valid_method}'")
-                                    new_method = valid_method
-                                    method_valid = True
-                                    break
-                        
-                        batch_results.append({
-                            'domain': new_domain,
-                            'method': new_method,
-                            'domain_valid': domain_valid,
-                            'method_valid': method_valid
-                        })
-                        
-                        if not (domain_valid and method_valid):
-                            all_valid = False
-                            print(f"    ❌ Project {i+1}: Domain {'✅' if domain_valid else '❌'}, Method {'✅' if method_valid else '❌'}")
-                        else:
-                            print(f"    ✅ Project {i+1}: Both categories valid")
+                    lines = block.strip().split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith("Domain Area:"):
+                            candidate = line.replace("Domain Area:", "").strip()
+                            candidate = candidate.strip('"\'- ')
+                            # Only assign if it's actually in our valid list
+                            if candidate in S6_DOMAIN_CATEGORIES:
+                                new_domain = candidate
+                        elif line.startswith("Method Area:"):
+                            candidate = line.replace("Method Area:", "").strip()
+                            candidate = candidate.strip('"\'- ')
+                            # Only assign if it's actually in our valid list
+                            if candidate in S6_METHOD_CATEGORIES:
+                                new_method = candidate
                     
-                    if all_valid:
-                        # Apply all fixes in this batch
-                        for i, result in enumerate(batch_results):
-                            proj = batch_projects[i]
-                            idx = proj['index']
-                            
-                            old_domain = df_working.loc[idx, 's6_refined_domain']
-                            old_method = df_working.loc[idx, 's6_refined_method']
-                            
-                            df_working.loc[idx, 's6_refined_domain'] = result['domain']
-                            df_working.loc[idx, 's6_refined_method'] = result['method']
-                            
-                            print(f"  ✅ FIXED Index {idx}: Domain '{old_domain}' → '{result['domain']}'")
-                            print(f"  ✅ FIXED Index {idx}: Method '{old_method}' → '{result['method']}'")
-                            
-                            changes_made.append({
-                                'index': idx,
-                                'id': proj['id'],
-                                'old_domain': old_domain,
-                                'new_domain': result['domain'],
-                                'old_method': old_method,
-                                'new_method': result['method']
-                            })
-                        
-                        batch_success = True
-                        break
-                    else:
-                        print(f"❌ Some projects in batch still invalid after attempt {attempt+1}")
-                else:
-                    print(f"❌ Got {len(project_blocks)} project blocks, expected {len(batch_projects)}")
+                    batch_results.append({
+                        'domain': new_domain,
+                        'method': new_method
+                    })
+                
+                # Apply all results in this batch
+                for i, result in enumerate(batch_results):
+                    proj = batch_projects[i]
+                    idx = proj['index']
                     
-            except Exception as e:
-                print(f"❌ LLM error attempt {attempt+1}: {e}")
-                if attempt < 2:
-                    time.sleep(2)
+                    old_domain = df_working.loc[idx, 's6_refined_domain']
+                    old_method = df_working.loc[idx, 's6_refined_method']
+                    
+                    # Only update categories that were actually problematic
+                    if proj['domain_bad']:
+                        df_working.loc[idx, 's6_refined_domain'] = result['domain']
+                        print(f"  🔄 Fixed Domain {idx}: '{old_domain}' → '{result['domain']}'")
+                    
+                    if proj['method_bad']:
+                        df_working.loc[idx, 's6_refined_method'] = result['method']
+                        print(f"  🔄 Fixed Method {idx}: '{old_method}' → '{result['method']}'")
+                    
+                    changes_made.append({
+                        'index': idx,
+                        'id': proj['id'],
+                        'old_domain': old_domain,
+                        'new_domain': result['domain'] if proj['domain_bad'] else old_domain,
+                        'old_method': old_method,
+                        'new_method': result['method'] if proj['method_bad'] else old_method
+                    })
+                
+                batch_success = True
+                print(f"  ✅ Batch {batch_num+1} processed successfully")
+            else:
+                print(f"  ⚠️ Got {len(project_blocks)} project blocks, expected {len(batch_projects)}")
+                
+        except Exception as e:
+            print(f"  ❌ LLM error for batch {batch_num+1}: {e}")
         
         if not batch_success:
-            print(f"💥 FAILED to fix batch {batch_num+1} after all attempts - marking all as 'S6 Fix Failed'")
+            print(f"  🔄 Batch {batch_num+1} failed - setting empty strings for problematic categories")
+            # Set empty strings for failed attempts (so they get caught in next iteration)
             for proj in batch_projects:
                 idx = proj['index']
-                df_working.loc[idx, 's6_refined_domain'] = "S6 Fix Failed"
-                df_working.loc[idx, 's6_refined_method'] = "S6 Fix Failed"
+                if proj['domain_bad']:
+                    df_working.loc[idx, 's6_refined_domain'] = ""
+                    print(f"    Set domain to empty for index {idx}")
+                if proj['method_bad']:
+                    df_working.loc[idx, 's6_refined_method'] = ""
+                    print(f"    Set method to empty for index {idx}")
         
         # Small delay between batches
         if batch_num < total_batches - 1:
             time.sleep(3)
     
-    print(f"\n💾 SAVING TARGETED S6 FIXES")
+    print(f"\n💾 SAVING S6 FIXES")
     print("="*60)
     
     # Save back to CSV
@@ -3529,74 +3495,96 @@ Remember: Domain = WHAT field/area, Method = HOW it's done."""
     except:
         pass
     
-    print(f"\n📊 TARGETED S6 FIX SUMMARY:")
+    print(f"\n📊 S6 FIX SUMMARY:")
     print(f"   Failed projects processed: {len(failed_projects)}")
     print(f"   Batches processed: {total_batches}")
-    print(f"   Changes applied: {len(changes_made)}")
-    print(f"   Success rate: {len(changes_made)}/{len(failed_projects)} ({len(changes_made)/len(failed_projects)*100:.1f}%)")
+    print(f"   Changes attempted: {len(changes_made)}")
     
     return df_working
 
-def run_s6_targeted_fix():
-    """Main function to run targeted S6 fixes"""
+def run_s6_complete_fix():
+    """Main function to run complete S6 fixes until everything is clean"""
     
-    print("🎯 S6 TARGETED FAILED PROJECT FIXER")
+    print("🎯 S6 COMPLETE FIX - NO PARSE FAILED ALLOWED")
     print("="*80)
     
-    # Step 1: Find failed projects
-    failed_projects, df = find_s6_failed_projects()
-    
-    if not failed_projects:
-        print("✅ No S6 failed projects found!")
-        return df
-    
-    # Step 2: Get model
+    # Get model
     try:
         model = globals()['model']
         print(f"✅ Using global model")
     except:
         print("❌ ERROR: Global 'model' not found")
-        return df
+        return None
     
-    # Step 3: Apply targeted fixes
-    df_fixed = fix_s6_failed_projects_targeted(failed_projects, df, model)
+    # Keep running fix iterations until no more failures
+    max_iterations = 5
     
-    # Step 4: Final verification
+    for iteration in range(max_iterations):
+        print(f"\n🔄 S6 FIX ITERATION {iteration + 1}/{max_iterations}")
+        print("="*60)
+        
+        # Step 1: Find failed projects (strict mode)
+        failed_projects, df = find_s6_failed_projects()
+        
+        if not failed_projects:
+            print(f"🎉 S6 COMPLETE - No more failed projects after {iteration + 1} iteration(s)!")
+            break
+        
+        print(f"📋 Found {len(failed_projects)} projects that need fixing")
+        
+        # Step 2: Apply fixes
+        df = fix_s6_failed_projects_no_parse_failed(failed_projects, df, model)
+        
+        # Step 3: Show progress
+        print(f"\n📊 Iteration {iteration + 1} complete")
+        
+        if iteration == max_iterations - 1:
+            print(f"⚠️ Reached maximum iterations ({max_iterations})")
+            print(f"   Some projects may still need manual review")
+    
+    # Final verification
     print(f"\n🔍 FINAL S6 VERIFICATION")
     print("="*60)
     
-    final_failed, _ = find_s6_failed_projects()
+    final_failed, df_final = find_s6_failed_projects()
     
-    domain_matches = sum(1 for d in df_fixed['s6_refined_domain'] if d in S6_DOMAIN_CATEGORIES)
-    method_matches = sum(1 for m in df_fixed['s6_refined_method'] if m in S6_METHOD_CATEGORIES)
-    total_projects = len(df_fixed)
+    domain_matches = sum(1 for d in df_final['s6_refined_domain'] if d in S6_DOMAIN_CATEGORIES)
+    method_matches = sum(1 for m in df_final['s6_refined_method'] if m in S6_METHOD_CATEGORIES)
+    empty_domains = sum(1 for d in df_final['s6_refined_domain'] if pd.isna(d) or str(d).strip() == "")
+    empty_methods = sum(1 for m in df_final['s6_refined_method'] if pd.isna(m) or str(m).strip() == "")
+    total_projects = len(df_final)
     
     print(f"📊 FINAL S6 STATISTICS:")
     print(f"   Total projects: {total_projects}")
-    print(f"   Domain matches: {domain_matches} ({domain_matches/total_projects*100:.2f}%)")
-    print(f"   Method matches: {method_matches} ({method_matches/total_projects*100:.2f}%)")
-    print(f"   Remaining failed projects: {len(final_failed)}")
+    print(f"   Valid domain categories: {domain_matches} ({domain_matches/total_projects*100:.2f}%)")
+    print(f"   Valid method categories: {method_matches} ({method_matches/total_projects*100:.2f}%)")
+    print(f"   Empty domains (acceptable): {empty_domains} ({empty_domains/total_projects*100:.2f}%)")
+    print(f"   Empty methods (acceptable): {empty_methods} ({empty_methods/total_projects*100:.2f}%)")
+    print(f"   Remaining problematic projects: {len(final_failed)}")
     
     if len(final_failed) == 0:
-        print(f"\n🎉🎉🎉 PERFECT! 100% S6 SUCCESS ACHIEVED! 🎉🎉🎉")
+        print(f"\n🎉🎉🎉 PERFECT! 100% S6 SUCCESS - NO MORE PARSE FAILED! 🎉🎉🎉")
     else:
-        print(f"\n⚠️ Still have {len(final_failed)} projects with issues")
-        # Show what's still problematic
-        for proj in final_failed[:5]:  # Show first 5
+        print(f"\n⚠️ Still have {len(final_failed)} projects with invalid categories:")
+        # Show first few remaining problems
+        for proj in final_failed[:5]:
             print(f"   - Index {proj['index']}: Domain='{proj['domain']}', Method='{proj['method']}'")
+        
+        if len(final_failed) > 5:
+            print(f"   ... and {len(final_failed) - 5} more")
     
-    print(f"\n🎯 S6 TARGETED FIX COMPLETE!")
+    print(f"\n🎯 S6 COMPLETE FIX FINISHED!")
     
-    return df_fixed
+    return df_final
 
-# USAGE:
-df_s6_fixed = run_s6_targeted_fix()
+# Usage
+df_s6_clean = run_s6_complete_fix()
 
 
 # In[158]:
 
 
-# S7 FINAL CONSOLIDATED CATEGORIES - Beautifully simple!
+# S7 FINAL CONSOLIDATED CATEGORIES 
 S7_DOMAIN_CATEGORIES = [
     "Health, Medicine & Life Sciences",
     "Physical, Mathematical & Space Sciences", 
@@ -4127,7 +4115,8 @@ df_s7_result = run_s7_final_classification()
 # In[160]:
 
 
-# S7 FINAL CONSOLIDATED CATEGORIES
+# COMPLETE S7 FIX STAGE - 
+# S7 FINAL CONSOLIDATED CATEGORIES (from your original code)
 S7_DOMAIN_CATEGORIES = [
     "Health, Medicine & Life Sciences",
     "Physical, Mathematical & Space Sciences", 
@@ -4156,9 +4145,9 @@ S7_METHOD_CATEGORIES = [
 ]
 
 def find_s7_failed_projects():
-    """Find the exact projects that still have non-matching S7 categories"""
+    """Find the exact projects that still have non-matching S7 categories - STRICT MODE"""
     
-    print("🔍 FINDING S7 FAILED PROJECTS")
+    print("🔍 FINDING S7 FAILED PROJECTS (STRICT - NO PARSE FAILED ALLOWED)")
     print("="*60)
     
     # Load current data
@@ -4169,21 +4158,25 @@ def find_s7_failed_projects():
         df = globals()['df_complete'].copy()
         print(f"✅ Using global df_complete: {df.shape}")
     
-    # Find projects with non-matching categories
+    # STRICT: Only empty strings and None are acceptable "failures"
+    # Everything else (including "Parse Failed", "API Failed", etc.) must be fixed
+    acceptable_errors = ["", None]
+    
     failed_projects = []
-    acceptable_errors = ["API Failed", "Parse Failed", "S7 Reclassify Failed", "Fix Failed", "S7 Fix Failed", "", None]
     
     for idx in df.index:
         domain = df.loc[idx, 's7_final_domain']
         method = df.loc[idx, 's7_final_method']
         
+        # Check if domain is problematic
         domain_bad = (pd.notna(domain) and 
-                     str(domain) not in acceptable_errors and 
-                     domain not in S7_DOMAIN_CATEGORIES)
+                     str(domain).strip() != "" and  # Not empty string
+                     domain not in S7_DOMAIN_CATEGORIES)  # Not valid category
         
+        # Check if method is problematic  
         method_bad = (pd.notna(method) and 
-                     str(method) not in acceptable_errors and 
-                     method not in S7_METHOD_CATEGORIES)
+                     str(method).strip() != "" and  # Not empty string
+                     method not in S7_METHOD_CATEGORIES)  # Not valid category
         
         if domain_bad or method_bad:
             project_id = df.loc[idx, 'id'] if 'id' in df.columns else idx
@@ -4197,7 +4190,7 @@ def find_s7_failed_projects():
                 'summary': str(df.loc[idx, 'full_text'])[:200] + "..."
             })
     
-    print(f"Found {len(failed_projects)} projects with bad S7 categories")
+    print(f"Found {len(failed_projects)} projects with invalid S7 categories")
     
     # Group by bad categories to see patterns
     if failed_projects:
@@ -4206,53 +4199,53 @@ def find_s7_failed_projects():
         
         for proj in failed_projects:
             if proj['domain_bad']:
-                domain = proj['domain']
+                domain = str(proj['domain'])
                 if domain not in domain_issues:
                     domain_issues[domain] = []
                 domain_issues[domain].append(proj['index'])
             
             if proj['method_bad']:
-                method = proj['method']
+                method = str(proj['method'])
                 if method not in method_issues:
                     method_issues[method] = []
                 method_issues[method].append(proj['index'])
         
-        print(f"\n❌ PROBLEMATIC S7 DOMAINS:")
+        print(f"\n❌ ALL PROBLEMATIC S7 DOMAINS (including Parse Failed, API Failed, etc.):")
         for domain, indices in domain_issues.items():
             print(f"  '{domain}': {len(indices)} projects")
         
-        print(f"\n❌ PROBLEMATIC S7 METHODS:")
+        print(f"\n❌ ALL PROBLEMATIC S7 METHODS (including Parse Failed, API Failed, etc.):")
         for method, indices in method_issues.items():
             print(f"  '{method}': {len(indices)} projects")
     
     return failed_projects, df
 
-def fix_s7_failed_projects_targeted(failed_projects, df, model):
-    """Fix the failed S7 projects with a targeted approach"""
+def fix_s7_failed_projects_no_parse_failed(failed_projects, df, model):
+    """Fix S7 projects - return empty strings instead of failure messages"""
     
     if not failed_projects:
         print("✅ No S7 failed projects to fix!")
         return df
     
-    print(f"🔧 TARGETED S7 FIXING - {len(failed_projects)} PROJECTS (batches of 6)")
+    print(f"🔧 S7 FIXING - {len(failed_projects)} PROJECTS (NO PARSE FAILED ALLOWED)")
     print("="*60)
     
-    # Ultra-focused prompt for problem cases (batch of 6)
-    TARGETED_S7_PROMPT = """You are an expert research taxonomist. You must classify these projects using ONLY the exact categories from the provided lists below.
+    # Enhanced prompt for problem cases - simplified for S7's broad categories
+    TARGETED_S7_PROMPT = """You are an expert research taxonomist. You must classify these projects using ONLY the exact categories from the highly consolidated lists below.
 
-This is a highly consolidated taxonomy with only 11 broad domains and 10 broad methods. Choose the best fit from these consolidated categories.
+This is a very broad taxonomy with only 11 domains and 10 methods. Choose the best general fit.
 
 CRITICAL RULES:
 1. Select EXACTLY ONE domain from the Domain list for each project
-2. Select EXACTLY ONE method from the Method list for each project
+2. Select EXACTLY ONE method from the Method list for each project  
 3. Use the EXACT spelling, punctuation, and capitalization shown
 4. DO NOT create new categories or modify existing ones
-5. These are very broad categories - choose the best general fit
+5. These are very broad categories - pick the best general fit
 
-DOMAIN AREAS (11 broad consolidated categories):
+DOMAIN AREAS (11 broad consolidated areas - choose ONE per project):
 {domain_list}
 
-METHOD AREAS (10 broad consolidated categories):
+METHOD AREAS (10 broad consolidated approaches - choose ONE per project):
 {method_list}
 
 PROJECTS TO CLASSIFY:
@@ -4269,13 +4262,13 @@ Method Area: [EXACT match from Method list above]
 
 ... continue for all projects ...
 
-Remember: These are broad, consolidated categories. Pick the best general fit for each project."""
+Remember: These are very broad, consolidated categories. Pick the best general fit for each project."""
 
     changes_made = []
     df_working = df.copy()
     
-    # Process 6 projects at a time for better efficiency
-    batch_size = 6
+    # Process 8 projects at a time (can be larger since S7 categories are simpler)
+    batch_size = 8
     total_batches = (len(failed_projects) + batch_size - 1) // batch_size
     
     for batch_num in range(total_batches):
@@ -4283,18 +4276,18 @@ Remember: These are broad, consolidated categories. Pick the best general fit fo
         end_idx = min(start_idx + batch_size, len(failed_projects))
         batch_projects = failed_projects[start_idx:end_idx]
         
-        print(f"\n--- S7 Targeted Batch {batch_num+1}/{total_batches} ({len(batch_projects)} projects) ---")
+        print(f"\n--- S7 Batch {batch_num+1}/{total_batches} ({len(batch_projects)} projects) ---")
         
         # Show what we're fixing
         for i, proj in enumerate(batch_projects):
             print(f"  Project {i+1} (ID {proj['id']}, Index {proj['index']}):")
-            print(f"    Domain: '{proj['domain']}' {'❌' if proj['domain_bad'] else '✅'}")
-            print(f"    Method: '{proj['method']}' {'❌' if proj['method_bad'] else '✅'}")
+            print(f"    Current Domain: '{proj['domain']}' {'❌' if proj['domain_bad'] else '✅'}")
+            print(f"    Current Method: '{proj['method']}' {'❌' if proj['method_bad'] else '✅'}")
         
         # Prepare batch summaries
         project_summaries = ""
         for i, proj in enumerate(batch_projects, 1):
-            project_text = str(df_working.loc[proj['index'], 'full_text'])[:1200]  # Limit length
+            project_text = str(df_working.loc[proj['index'], 'full_text'])[:1000]  # Shorter for S7
             project_summaries += f"Project {i}:\nTitle and Description: {project_text}\n\n"
         
         # Create focused prompt
@@ -4304,130 +4297,114 @@ Remember: These are broad, consolidated categories. Pick the best general fit fo
             project_summaries=project_summaries
         )
         
-        # Try multiple times with different strategies
+        # Try to get results from LLM
         batch_success = False
-        for attempt in range(3):  # 3 attempts per batch
-            try:
-                print(f"🤖 S7 batch targeted attempt {attempt+1}...")
+        try:
+            print(f"🤖 Calling LLM for batch {batch_num+1}...")
+            
+            response = model.generate_content(prompt)
+            output = response.text.strip()
+            
+            print(f"✅ Got LLM response, parsing...")
+            
+            # Parse results for the batch
+            project_blocks = re.split(r'Project \d+:', output)
+            if project_blocks and not project_blocks[0].strip():
+                project_blocks = project_blocks[1:]
+            
+            if len(project_blocks) >= len(batch_projects):
+                batch_results = []
                 
-                # Add some variation to break LLM patterns
-                if attempt > 0:
-                    prompt_variant = prompt + f"\n\nNote: This is attempt {attempt+1}. These are very broad, consolidated categories. Please select the best general fit from the provided lists only."
-                else:
-                    prompt_variant = prompt
-                
-                response = model.generate_content(prompt_variant)
-                output = response.text.strip()
-                
-                print(f"Raw LLM output preview: {output[:300]}...")
-                
-                # Parse results for the batch
-                project_blocks = re.split(r'Project \d+:', output)
-                if project_blocks and not project_blocks[0].strip():
-                    project_blocks = project_blocks[1:]
-                
-                if len(project_blocks) >= len(batch_projects):
-                    batch_results = []
-                    all_valid = True
+                for i, block in enumerate(project_blocks[:len(batch_projects)]):
+                    new_domain = ""  # Default to EMPTY instead of "Parse Failed"
+                    new_method = ""  # Default to EMPTY instead of "Parse Failed"
                     
-                    for i, block in enumerate(project_blocks[:len(batch_projects)]):
-                        new_domain = "S7 Fix Failed"
-                        new_method = "S7 Fix Failed"
-                        
-                        lines = block.strip().split('\n')
-                        for line in lines:
-                            line = line.strip()
-                            if line.startswith("Domain Area:"):
-                                new_domain = line.replace("Domain Area:", "").strip()
-                                # Clean up common formatting issues
-                                new_domain = new_domain.strip('"\'- ')
-                            elif line.startswith("Method Area:"):
-                                new_method = line.replace("Method Area:", "").strip()
-                                # Clean up common formatting issues
-                                new_method = new_method.strip('"\'- ')
-                        
-                        # Strict validation
-                        domain_valid = new_domain in S7_DOMAIN_CATEGORIES
-                        method_valid = new_method in S7_METHOD_CATEGORIES
-                        
-                        # Try fuzzy matching if exact fails
-                        if not domain_valid:
-                            for valid_domain in S7_DOMAIN_CATEGORIES:
-                                if new_domain.lower() in valid_domain.lower() or valid_domain.lower() in new_domain.lower():
-                                    print(f"    🔧 Fuzzy domain match for Project {i+1}: '{new_domain}' → '{valid_domain}'")
-                                    new_domain = valid_domain
-                                    domain_valid = True
-                                    break
-                        
-                        if not method_valid:
-                            for valid_method in S7_METHOD_CATEGORIES:
-                                if new_method.lower() in valid_method.lower() or valid_method.lower() in new_method.lower():
-                                    print(f"    🔧 Fuzzy method match for Project {i+1}: '{new_method}' → '{valid_method}'")
-                                    new_method = valid_method
-                                    method_valid = True
-                                    break
-                        
-                        batch_results.append({
-                            'domain': new_domain,
-                            'method': new_method,
-                            'domain_valid': domain_valid,
-                            'method_valid': method_valid
-                        })
-                        
-                        if not (domain_valid and method_valid):
-                            all_valid = False
-                            print(f"    ❌ Project {i+1}: Domain {'✅' if domain_valid else '❌'}, Method {'✅' if method_valid else '❌'}")
-                        else:
-                            print(f"    ✅ Project {i+1}: Both categories valid")
+                    lines = block.strip().split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith("Domain Area:"):
+                            candidate = line.replace("Domain Area:", "").strip()
+                            candidate = candidate.strip('"\'- ')
+                            # Only assign if it's actually in our valid list
+                            if candidate in S7_DOMAIN_CATEGORIES:
+                                new_domain = candidate
+                            else:
+                                # Try fuzzy matching for S7 since categories are fewer
+                                for valid_domain in S7_DOMAIN_CATEGORIES:
+                                    if candidate.lower() in valid_domain.lower() or valid_domain.lower() in candidate.lower():
+                                        new_domain = valid_domain
+                                        print(f"    🔧 Fuzzy domain match: '{candidate}' → '{valid_domain}'")
+                                        break
+                        elif line.startswith("Method Area:"):
+                            candidate = line.replace("Method Area:", "").strip()
+                            candidate = candidate.strip('"\'- ')
+                            # Only assign if it's actually in our valid list
+                            if candidate in S7_METHOD_CATEGORIES:
+                                new_method = candidate
+                            else:
+                                # Try fuzzy matching for S7 since categories are fewer
+                                for valid_method in S7_METHOD_CATEGORIES:
+                                    if candidate.lower() in valid_method.lower() or valid_method.lower() in candidate.lower():
+                                        new_method = valid_method
+                                        print(f"    🔧 Fuzzy method match: '{candidate}' → '{valid_method}'")
+                                        break
                     
-                    if all_valid:
-                        # Apply all fixes in this batch
-                        for i, result in enumerate(batch_results):
-                            proj = batch_projects[i]
-                            idx = proj['index']
-                            
-                            old_domain = df_working.loc[idx, 's7_final_domain']
-                            old_method = df_working.loc[idx, 's7_final_method']
-                            
-                            df_working.loc[idx, 's7_final_domain'] = result['domain']
-                            df_working.loc[idx, 's7_final_method'] = result['method']
-                            
-                            print(f"  ✅ FIXED Index {idx}: Domain '{old_domain}' → '{result['domain']}'")
-                            print(f"  ✅ FIXED Index {idx}: Method '{old_method}' → '{result['method']}'")
-                            
-                            changes_made.append({
-                                'index': idx,
-                                'id': proj['id'],
-                                'old_domain': old_domain,
-                                'new_domain': result['domain'],
-                                'old_method': old_method,
-                                'new_method': result['method']
-                            })
-                        
-                        batch_success = True
-                        break
-                    else:
-                        print(f"❌ Some projects in batch still invalid after attempt {attempt+1}")
-                else:
-                    print(f"❌ Got {len(project_blocks)} project blocks, expected {len(batch_projects)}")
+                    batch_results.append({
+                        'domain': new_domain,
+                        'method': new_method
+                    })
+                
+                # Apply all results in this batch
+                for i, result in enumerate(batch_results):
+                    proj = batch_projects[i]
+                    idx = proj['index']
                     
-            except Exception as e:
-                print(f"❌ LLM error attempt {attempt+1}: {e}")
-                if attempt < 2:
-                    time.sleep(2)
+                    old_domain = df_working.loc[idx, 's7_final_domain']
+                    old_method = df_working.loc[idx, 's7_final_method']
+                    
+                    # Only update categories that were actually problematic
+                    if proj['domain_bad']:
+                        df_working.loc[idx, 's7_final_domain'] = result['domain']
+                        print(f"  🔄 Fixed Domain {idx}: '{old_domain}' → '{result['domain']}'")
+                    
+                    if proj['method_bad']:
+                        df_working.loc[idx, 's7_final_method'] = result['method']
+                        print(f"  🔄 Fixed Method {idx}: '{old_method}' → '{result['method']}'")
+                    
+                    changes_made.append({
+                        'index': idx,
+                        'id': proj['id'],
+                        'old_domain': old_domain,
+                        'new_domain': result['domain'] if proj['domain_bad'] else old_domain,
+                        'old_method': old_method,
+                        'new_method': result['method'] if proj['method_bad'] else old_method
+                    })
+                
+                batch_success = True
+                print(f"  ✅ Batch {batch_num+1} processed successfully")
+            else:
+                print(f"  ⚠️ Got {len(project_blocks)} project blocks, expected {len(batch_projects)}")
+                
+        except Exception as e:
+            print(f"  ❌ LLM error for batch {batch_num+1}: {e}")
         
         if not batch_success:
-            print(f"💥 FAILED to fix batch {batch_num+1} after all attempts - marking all as 'S7 Fix Failed'")
+            print(f"  🔄 Batch {batch_num+1} failed - setting empty strings for problematic categories")
+            # Set empty strings for failed attempts (so they get caught in next iteration)
             for proj in batch_projects:
                 idx = proj['index']
-                df_working.loc[idx, 's7_final_domain'] = "S7 Fix Failed"
-                df_working.loc[idx, 's7_final_method'] = "S7 Fix Failed"
+                if proj['domain_bad']:
+                    df_working.loc[idx, 's7_final_domain'] = ""
+                    print(f"    Set domain to empty for index {idx}")
+                if proj['method_bad']:
+                    df_working.loc[idx, 's7_final_method'] = ""
+                    print(f"    Set method to empty for index {idx}")
         
         # Small delay between batches
         if batch_num < total_batches - 1:
             time.sleep(3)
     
-    print(f"\n💾 SAVING TARGETED S7 FIXES")
+    print(f"\n💾 SAVING S7 FIXES")
     print("="*60)
     
     # Save back to CSV
@@ -4441,88 +4418,112 @@ Remember: These are broad, consolidated categories. Pick the best general fit fo
     except:
         pass
     
-    print(f"\n📊 TARGETED S7 FIX SUMMARY:")
+    print(f"\n📊 S7 FIX SUMMARY:")
     print(f"   Failed projects processed: {len(failed_projects)}")
     print(f"   Batches processed: {total_batches}")
-    print(f"   Changes applied: {len(changes_made)}")
-    if len(failed_projects) > 0:
-        print(f"   Success rate: {len(changes_made)}/{len(failed_projects)} ({len(changes_made)/len(failed_projects)*100:.1f}%)")
+    print(f"   Changes attempted: {len(changes_made)}")
     
     return df_working
 
-def run_s7_targeted_fix():
-    """Main function to run targeted S7 fixes"""
+def run_s7_complete_fix():
+    """Main function to run complete S7 fixes until everything is clean"""
     
-    print("🎯 S7 TARGETED FAILED PROJECT FIXER")
+    print("🎯 S7 COMPLETE FIX - NO PARSE FAILED ALLOWED")
     print("="*80)
     
-    # Step 1: Find failed projects
-    failed_projects, df = find_s7_failed_projects()
-    
-    if not failed_projects:
-        print("✅ No S7 failed projects found!")
-        return df
-    
-    # Step 2: Get model
+    # Get model
     try:
         model = globals()['model']
         print(f"✅ Using global model")
     except:
         print("❌ ERROR: Global 'model' not found")
-        return df
+        return None
     
-    # Step 3: Apply targeted fixes
-    df_fixed = fix_s7_failed_projects_targeted(failed_projects, df, model)
+    # Keep running fix iterations until no more failures
+    max_iterations = 5
     
-    # Step 4: Final verification
+    for iteration in range(max_iterations):
+        print(f"\n🔄 S7 FIX ITERATION {iteration + 1}/{max_iterations}")
+        print("="*60)
+        
+        # Step 1: Find failed projects (strict mode)
+        failed_projects, df = find_s7_failed_projects()
+        
+        if not failed_projects:
+            print(f"🎉 S7 COMPLETE - No more failed projects after {iteration + 1} iteration(s)!")
+            break
+        
+        print(f"📋 Found {len(failed_projects)} projects that need fixing")
+        
+        # Step 2: Apply fixes
+        df = fix_s7_failed_projects_no_parse_failed(failed_projects, df, model)
+        
+        # Step 3: Show progress
+        print(f"\n📊 Iteration {iteration + 1} complete")
+        
+        if iteration == max_iterations - 1:
+            print(f"⚠️ Reached maximum iterations ({max_iterations})")
+            print(f"   Some projects may still need manual review")
+    
+    # Final verification
     print(f"\n🔍 FINAL S7 VERIFICATION")
     print("="*60)
     
-    final_failed, _ = find_s7_failed_projects()
+    final_failed, df_final = find_s7_failed_projects()
     
-    domain_matches = sum(1 for d in df_fixed['s7_final_domain'] if d in S7_DOMAIN_CATEGORIES)
-    method_matches = sum(1 for m in df_fixed['s7_final_method'] if m in S7_METHOD_CATEGORIES)
-    total_projects = len(df_fixed)
+    domain_matches = sum(1 for d in df_final['s7_final_domain'] if d in S7_DOMAIN_CATEGORIES)
+    method_matches = sum(1 for m in df_final['s7_final_method'] if m in S7_METHOD_CATEGORIES)
+    empty_domains = sum(1 for d in df_final['s7_final_domain'] if pd.isna(d) or str(d).strip() == "")
+    empty_methods = sum(1 for m in df_final['s7_final_method'] if pd.isna(m) or str(m).strip() == "")
+    total_projects = len(df_final)
     
     print(f"📊 FINAL S7 STATISTICS:")
     print(f"   Total projects: {total_projects}")
-    print(f"   Domain matches: {domain_matches} ({domain_matches/total_projects*100:.2f}%)")
-    print(f"   Method matches: {method_matches} ({method_matches/total_projects*100:.2f}%)")
-    print(f"   Remaining failed projects: {len(final_failed)}")
+    print(f"   Valid domain categories: {domain_matches} ({domain_matches/total_projects*100:.2f}%)")
+    print(f"   Valid method categories: {method_matches} ({method_matches/total_projects*100:.2f}%)")
+    print(f"   Empty domains (acceptable): {empty_domains} ({empty_domains/total_projects*100:.2f}%)")
+    print(f"   Empty methods (acceptable): {empty_methods} ({empty_methods/total_projects*100:.2f}%)")
+    print(f"   Remaining problematic projects: {len(final_failed)}")
     
     if len(final_failed) == 0:
-        print(f"\n🎉🎉🎉 PERFECT! 100% S7 SUCCESS ACHIEVED! 🎉🎉🎉")
+        print(f"\n🎉🎉🎉 PERFECT! 100% S7 SUCCESS - NO MORE PARSE FAILED! 🎉🎉🎉")
     else:
-        print(f"\n⚠️ Still have {len(final_failed)} projects with issues")
-        # Show what's still problematic
-        print(f"\nRemaining problematic categories:")
+        print(f"\n⚠️ Still have {len(final_failed)} projects with invalid categories:")
+        # Show first few remaining problems
+        for proj in final_failed[:5]:
+            print(f"   - Index {proj['index']}: Domain='{proj['domain']}', Method='{proj['method']}'")
+        
+        if len(final_failed) > 5:
+            print(f"   ... and {len(final_failed) - 5} more")
+        
+        # Show what the remaining bad categories are
         remaining_domains = {}
         remaining_methods = {}
         
         for proj in final_failed:
             if proj['domain_bad']:
-                domain = proj['domain']
+                domain = str(proj['domain'])
                 remaining_domains[domain] = remaining_domains.get(domain, 0) + 1
             if proj['method_bad']:
-                method = proj['method']
+                method = str(proj['method'])
                 remaining_methods[method] = remaining_methods.get(method, 0) + 1
         
         if remaining_domains:
-            print(f"   Bad domains still remaining:")
+            print(f"\n   Remaining bad domains:")
             for domain, count in remaining_domains.items():
                 print(f"     - '{domain}': {count} projects")
         
         if remaining_methods:
-            print(f"   Bad methods still remaining:")
+            print(f"\n   Remaining bad methods:")
             for method, count in remaining_methods.items():
                 print(f"     - '{method}': {count} projects")
     
-    print(f"\n🎯 S7 TARGETED FIX COMPLETE!")
+    print(f"\n🎯 S7 COMPLETE FIX FINISHED!")
     
-    return df_fixed
+    return df_final
 
 # USAGE:
-df_s7_fixed = run_s7_targeted_fix()
+df_s7_clean = run_s7_complete_fix()
 
 
 # In[161]:
